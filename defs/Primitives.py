@@ -22,16 +22,19 @@ class Map:
         return (self.value(x,y), self.gradient(x,y))
 
 class Integrator:
-    def __init__(self):
-        pass
+    def __init__(self, element1 : Map, element2 : Map):
+        self.map1 = element1
+        self.map2 = element2
     def value_integral(self):
         raise NotImplementedError()
     def gradient_integral(self):
         raise NotImplementedError()
 
 class Element:
-    def __init__(self, integrator : Integrator):
+    def __init__(self, shape):
         super().__init__()
-        self.integrator = integrator
+        self.shape = shape
+    def build() -> Integrator:
+        raise NotImplementedError()
 
 

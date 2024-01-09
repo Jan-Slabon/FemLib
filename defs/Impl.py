@@ -1,6 +1,6 @@
 import numpy as np
 from scipy import integrate
-from  Primitives import Map, Integrator, Element
+from defs.Primitives import Map, Integrator, Element
 
 class Const_map(Map):
     def __init__(self, a, b, c):
@@ -16,7 +16,7 @@ class Const_map(Map):
                 [self.b[0], self.b[1], 1],
                 [self.c[0], self.c[1], 1]] )
 
-class Linear_map(Map):
+class Linear_Map(Map):
     def __init__(self, a, b, c):
         self.a = a
         self.b = b
@@ -57,31 +57,22 @@ class Linear_map(Map):
     def gradient_function(self, x, y):
         dx = self.b[1] - self.c[1]
         dy = -self.b[0] + self.c[0]
-        return np.array([dx, dy] /  np.linalg.det(self.area))
+        return np.array([dx, dy] /  np.linalg.det(self.area()))
 
 
 
 class Linear_Integrator(Integrator):
-    def __init__(self, map : Linear_map) -> None:
-        super().__init__()
-        self.map1 = map
-        self.map2 = Linear_map(map.b, map.c, map.a)
-        self.map3 = Linear_map(map.c, map.a, map.b)
-
+    def __init__(self, lin_map : Linear_Map, lin_map2) -> None:
+        super().__init__(lin_map, lin_map2)
     def value_integral(self):
         integral1, err1 = integrate.dblquad(lambda x,y : self.map1.shape_function(x,y) * self.map2.shape_function(x,y) *
         self.map1.jacobian(x,y), 0, 1, lambda x : 0, lambda x : 1 - x, epsabs=1.5e-4, epsrel=1.5e-4)
-        integral2, err2 = integrate.dblquad(lambda x,y : self.map2.shape_function(x,y) * self.map3.shape_function(x,y) *
-        self.map2.jacobian(x,y), 0, 1, lambda x : 0, lambda x : 1 - x, epsabs=1.5e-4, epsrel=1.5e-4)
-        integral3, err3 = integrate.dblquad(lambda x,y : self.map1.shape_function(x,y) * self.map3.shape_function(x,y) *
-        self.map1.jacobian(x,y), 0, 1, lambda x : 0, lambda x : 1 - x, epsabs=1.5e-4, epsrel=1.5e-4)
-        return integral1, integral2, integral3
-
-    def gradient_integral(self):
+        return integral1
+    def gradient_integral(self) -> np.ndarray:
+        return np.trace(self.mixed_gradient_integral())
+    def mixed_gradient_integral(self) -> np.ndarray:
         df1_df2 = np.kron(self.map1.gradient_function(1,1) , self.map2.gradient_function(1,1)) * np.linalg.norm(np.linalg.det(self.map1.area()))
-        df2_df3 = np.kron(self.map2.gradient_function(1,1) , self.map3.gradient_function(1,1)) * np.linalg.norm(np.linalg.det(self.map1.area()))
-        df1_df3 = np.kron(self.map1.gradient_function(1,1) , self.map3.gradient_function(1,1)) * np.linalg.norm(np.linalg.det(self.map1.area()))
-        return df1_df2, df2_df3, df1_df3
+        return df1_df2.reshape((2,2))
 
 class Const_Integrator(Integrator):
     def __init__(self, map : Const_map) -> None:
@@ -97,8 +88,19 @@ class Const_Integrator(Integrator):
 
 
 class Linear_Element(Element):
-    def __init__(self, integrator: Linear_Integrator) -> None:
-        super().__init__(integrator)
+    def __init__(self, triangle: list) -> None:
+        super().__init__(triangle)
+    def build(self, node1, node2) -> Linear_Integrator:
+        for (i,el) in enumerate(self.shape):
+            if np.array_equal(el, node1):
+                map1 = Linear_Map(self.shape[i], self.shape[(i+1)%3], self.shape[(i+2)%3])
+                break
+        for (j,el) in enumerate(self.shape):
+            if np.array_equal(el, node2):
+                map2 = Linear_Map(self.shape[j], self.shape[(j+1)%3], self.shape[(j+2)%3])
+                break
+        return Linear_Integrator(map1, map2)
+
 class Const_Element(Element):
     def __init__(self, integrator: Const_Integrator) -> None:
         super().__init__(integrator)

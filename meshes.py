@@ -5,9 +5,8 @@ from scipy.spatial import Delaunay
 from scipy import integrate
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits import mplot3d
-from Triangles import triangle_map, Integaral, point
-
+from defs.Impl import Linear_Element, Linear_Map
+from defs.Primitives import Point
 
 def show(A):
     for el in A:
@@ -23,31 +22,33 @@ class Elements:
         self.enum = enum
         self.a = a 
         self.b = b
-
-    def ConstructStiffnesNonHomogenus(self):
         self.A = np.zeros((self.n, self.n))
         self.C = np.zeros((self.n, self.n))
         self.A2 = np.zeros((self.n, self.n))
         self.B = np.zeros((self.n*2, self.n*2))
         self.D = np.zeros((self.n*2))
+
+    def ConstructStiffnesNonHomogenus(self):
         for triangle in self.triangles:
-            tr = []
-            tr2 = []
-            for i in range(3):
-                if self.enum[triangle[i]].group_id != -1:
-                    tr.append(triangle_map(self.points[triangle[i%3]], self.points[triangle[(i+1)%3]], self.points[triangle[(i+2)%3]]))
-                    tr2.append(self.enum[triangle[i]])
-                tmp = self.enum[triangle[i]]
-                if tmp.group_id == -3:
-                    self.B[tmp.rid+self.n][tmp.rid+self.n] = -1
-                    self.D[tmp.rid+self.n] = 0#(np.sin(32*tmp.x[0]) + 1)/16
-            for trian, p in zip(tr, tr2):
-                for trian2, p2 in zip(tr,tr2):
-                    tmp = Integaral(trian, trian2)
-                    tmp2 = self.a * tmp.gradient_integral()
-                    self.A[p.rid][p2.rid] += tmp2 + (self.a + self.b) * tmp.partial_integral_1()
-                    self.C[p.rid][p2.rid] += (self.a + self.b) * tmp.partial_integral_12()
-                    self.A2[p.rid][p2.rid] += tmp2 + (self.a + self.b) * tmp.partial_integral_2()
+
+            element = Linear_Element([self.points[triangle[0]], self.points[triangle[1]], self.points[triangle[2]]])
+            desc = [self.enum[triangle[0]], self.enum[triangle[1]], self.enum[triangle[2]]]
+            for (node1,enum) in zip(triangle,desc):
+                for (node2,enum2) in zip(triangle,desc):
+                    if enum.group_id == -1 or enum2.group_id == -1:
+                        continue
+
+                    integrator = element.build(self.points[node1], self.points[node2])
+                    grad = integrator.gradient_integral()
+                    mix_grad = integrator.mixed_gradient_integral()
+
+                    self.A[enum.rid][enum2.rid] += self.a * grad + (self.a + self.b) * mix_grad[0][0]
+                    self.C[enum.rid][enum2.rid] += (self.a + self.b) * mix_grad[0][1]
+                    self.A2[enum.rid][enum2.rid] += self.a * grad + (self.a + self.b) * mix_grad[1][1]
+
+                    if enum.group_id == -3:
+                        self.B[enum.rid+self.n][enum.rid+self.n] = -1
+                        self.D[enum.rid+self.n] = 0.2
         
     def Create_Right_NonHomogenus(self, function, boundary):
         self.f1 = np.zeros(self.n)
@@ -57,33 +58,33 @@ class Elements:
             tr2 = []
             for i in range(3):
                 if self.enum[triangle[i]].group_id != -1:
-                    tr.append(triangle_map(self.points[triangle[i%3]], self.points[triangle[(i+1)%3]], self.points[triangle[(i+2)%3]]))
+                    tr.append(Linear_Map(self.points[triangle[i%3]], self.points[triangle[(i+1)%3]], self.points[triangle[(i+2)%3]]))
                     tr2.append(self.enum[triangle[i]])
             neuman = []
             for trian, p in zip(tr,tr2):
                 if p.group_id == 0:
-                    area, err = integrate.dblquad(lambda x,y : trian.shapeFunction(x,y) * function(trian.map_triangle([x,y]))[0] *
+                    area, err = integrate.dblquad(lambda x,y : trian.shape_function(x,y) * function(trian.map_triangle([x,y]))[0] *
                     trian.jacobian(x,y), 0, 1, lambda x : 0, lambda x : 1 - x, epsabs=1.5e-4, epsrel=1.5e-4)
-                    area2, err2 = integrate.dblquad(lambda x,y : trian.shapeFunction(x,y) * function(trian.map_triangle([x,y]))[1] *
+                    area2, err2 = integrate.dblquad(lambda x,y : trian.shape_function(x,y) * function(trian.map_triangle([x,y]))[1] *
                     trian.jacobian(x,y), 0, 1, lambda x : 0, lambda x : 1 - x, epsabs=1.5e-4, epsrel=1.5e-4)
                     self.f1[p.rid] += area
                     self.f2[p.rid] += area2
                 elif p.group_id == -2:
-                    area, err = integrate.dblquad(lambda x,y : trian.shapeFunction(x,y) * function(trian.map_triangle([x,y]))[0] *
+                    area, err = integrate.dblquad(lambda x,y : trian.shape_function(x,y) * function(trian.map_triangle([x,y]))[0] *
                     trian.jacobian(x,y), 0, 1, lambda x : 0, lambda x : 1 - x, epsabs=1.5e-4, epsrel=1.5e-4)
-                    area2, err2 = integrate.dblquad(lambda x,y : trian.shapeFunction(x,y) * function(trian.map_triangle([x,y]))[1] *
+                    area2, err2 = integrate.dblquad(lambda x,y : trian.shape_function(x,y) * function(trian.map_triangle([x,y]))[1] *
                     trian.jacobian(x,y), 0, 1, lambda x : 0, lambda x : 1 - x, epsabs=1.5e-4, epsrel=1.5e-4)
                     self.f1[p.rid] += area # Homogenus Neuman Condition
                     self.f2[p.rid] += area2 #Homogenus Neuman Condition
                     neuman.append([trian,p])
             h = lambda x : 0
-            h2 = lambda x : 0
+            h2 = lambda x : -2
             if len(neuman) > 1: # NonHomogenus Neuman
                 for t, p in neuman:
                     for t2, p2 in neuman:
                         if p.id != p2.id:
-                            self.f2[p.rid] += h(p.x)*0.5*np.linalg.norm(np.array(p.x) - np.array(p2.x))
-                            self.f1[p.rid] += h2(p.x)*0.5*np.linalg.norm(np.array(p.x) - np.array(p2.x))
+                            self.f1[p.rid] += h(p.x)*0.5*np.linalg.norm(np.array(p.x) - np.array(p2.x))
+                            self.f2[p.rid] += h2(p.x)*0.5*np.linalg.norm(np.array(p.x) - np.array(p2.x))
                          
     
     def AssambleMainMatrix(self):
@@ -97,7 +98,7 @@ class Elements:
         self.F[:k] = self.f1
         self.F[k:] = self.f2
     def solve(self):
-        functional = lambda x : 0.5 * x @ self.M @ x - self.F @ x
+        functional = lambda x : 0.5 * x @ self.M @ x  - self.F @ x
         constraint = LinearConstraint(self.B,lb = -inf, ub=self.D)
         counter = 0
         x = minimize(functional, np.zeros(np.shape(self.F)[0]), method='trust-constr', constraints=[constraint])
@@ -123,39 +124,39 @@ i=0
 r=0
 for p in points:
     if p[0] == p1 or p[0] == k:
-        enum.append(point(p, i, r,-1))
+        enum.append(Point(p, i, -1, -1))
 
     elif p[1] == e:
-        enum.append(point(p, i,r ,-2))
+        enum.append(Point(p, i,r ,-2))
         r+=1
     elif p[1] == b and p[0]>=0.2 and p[0]<=0.6:
-        enum.append(point(p, i, r, -3))
+        enum.append(Point(p, i, r, -3))
         r+=1
     else:
-        enum.append(point(p, i, r ,0))
+        enum.append(Point(p, i, r ,0))
         r+=1
     i+=1
     
 tri = Delaunay(points)
 i = 0
 j = 0
-plt.triplot(np.transpose(points)[0],np.transpose(points)[1], tri.simplices, color='gray')
-plt.ylim(top=0.4)
-plt.plot([p1,k],[e,e],color='blue', linestyle='dashed', label= 'Neuman boundary')
-plt.plot([p1,p1],[b,e],color='red', linestyle='solid', label = 'Dirichlet boundary')
-plt.plot([k,k],[b,e],color='red', linestyle='solid')
-plt.plot([0.2,0.6],[b,b],color='black', label = 'Contact boundary')
-plt.plot([p1,0.2],[b,b],color='blue', linestyle='dashed')
-plt.plot([0.6,0.2],[b,b],color='blue', linestyle='dashed')
-plt.legend()
-plt.show()
-elementBuilder = Elements(tri.simplices, points, enum, int(1/3 * n*n) - 2*int(n/3),1,2)#25.74,54.71)
+# plt.triplot(np.transpose(points)[0],np.transpose(points)[1], tri.simplices, color='gray')
+# plt.ylim(top=0.4)
+# plt.plot([p1,k],[e,e],color='blue', linestyle='dashed', label= 'Neuman boundary')
+# plt.plot([p1,p1],[b,e],color='red', linestyle='solid', label = 'Dirichlet boundary')
+# plt.plot([k,k],[b,e],color='red', linestyle='solid')
+# plt.plot([0.2,0.6],[b,b],color='black', label = 'Contact boundary')
+# plt.plot([p1,0.2],[b,b],color='blue', linestyle='dashed')
+# plt.plot([0.6,0.2],[b,b],color='blue', linestyle='dashed')
+# plt.legend()
+# plt.show()
+elementBuilder = Elements(tri.simplices, points, enum, r,1,2)#25.74,54.71)
 elementBuilder.ConstructStiffnesNonHomogenus()
 elementBuilder.Create_Right_NonHomogenus(lambda x : [0,0], lambda x: [0,0])
 elementBuilder.AssambleMainMatrix()
 res = elementBuilder.solve()
 inner = 0
-res = np.reshape(res, (2,int(1/3 * n*n) - 2*int(n/3)))
+res = np.reshape(res, (2,r))
 #points = np.transpose(points)
 pointsz = np.array(points)
 l=0
@@ -172,7 +173,7 @@ pointsz = np.transpose(pointsz)
 x = np.linspace(0,0.8,60)
 #plt.plot(x, -(np.sin(32*x) + 1)/16, color='black')
 plt.triplot(pointsz[0],pointsz[1], tri.simplices, color='blue')
-plt.plot([0.2,0.6],[0,0], color='black')
+plt.plot([0.2,0.6],[-0.2,-0.2], color='black')
 plt.ylim(top=0.4)
 
 plt.show()
