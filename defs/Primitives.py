@@ -1,5 +1,13 @@
+from enum import Enum
+from typing import List, Any
+import numpy as np
+class Group(Enum):
+    Interior = 1
+    Dirichlet = 2
+    Neuman = 3
+    Contact = 4
 class Point:
-    def __init__(self, x, id, rid, group_id):
+    def __init__(self, x, id, rid, group_id : Group):
         self.x = x
         self.id = id
         self.rid = rid
@@ -34,7 +42,31 @@ class Element:
     def __init__(self, shape):
         super().__init__()
         self.shape = shape
-    def build() -> Integrator:
+    def build(self) -> Integrator:
+        raise NotImplementedError()
+
+class Function():
+    def __init__(self, dom : int, codom : int, grid, values = np.array([])) -> None:
+        self.dom = dom
+        self.codom = codom
+        self.grid = grid
+        self.values = values
+    def show(self):
+        pass
+    def integral(self, func) -> float:
+        pass
+class Operator():
+    def __init__(self, grid) -> None:
+        self.grid = grid
+        self.allocate()
+    def construct(self) -> None:
+        for element in self.grid:
+            self.fill(element)
+    def fill(self, element) -> None:
+        raise NotImplementedError()
+    def allocate(self) -> None:
+        raise NotImplementedError()
+    def solve(self) -> Function:
         raise NotImplementedError()
 
 

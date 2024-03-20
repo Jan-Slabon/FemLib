@@ -1,8 +1,8 @@
 import numpy as np
 from scipy import integrate
-from defs.Primitives import Map, Integrator, Element
+from defs.Primitives import Map, Integrator, Element, Operator
 
-class Const_map(Map):
+class Const_Map(Map):
     def __init__(self, a, b, c):
         self.a = a
         self.b = b
@@ -75,7 +75,7 @@ class Linear_Integrator(Integrator):
         return df1_df2.reshape((2,2))
 
 class Const_Integrator(Integrator):
-    def __init__(self, map : Const_map) -> None:
+    def __init__(self, map : Const_Map) -> None:
         super().__init__()
         self.map = map
     def value_integral(self):
