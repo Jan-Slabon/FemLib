@@ -1,4 +1,12 @@
 import typing
+class Simplex:
+    def __init__(self, vertices : typing.List ) -> None:
+        self.vertices = vertices
+    def refine(self) -> typing.List:
+        #     .
+        #   ./_\.
+        # ./_\./_\.
+        pass
 class Complex(type):
     def __init__(self, decomposition) -> None:
         self.decomposition = decomposition
