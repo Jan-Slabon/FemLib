@@ -8,15 +8,14 @@ import matplotlib.pyplot as plt
 from defs.Impl import Linear_Element, Linear_Map
 from defs.Primitives import Point, Group, Operator, Function
 from defs.Solvers import LinearObstacleSolver
-from defs.utils.Plasticity import cast_to_set, tensor_norm
+from defs.utils.Plasticity import cast_to_set, tensor_norm, stress_offset
 from matplotlib.animation import FuncAnimation
 import time
 def right_corner(x):
-    return -200
-    # if x[0] <= 0.8 and x[0] >= 0.5 :
-    #     return -300
-    # else : 
-    #     return 0
+    if x[0] == 0.8:
+        return -100
+    else : 
+        return 0
 def is_zero(arr):
     flag = True
     for array_el in arr:
@@ -133,31 +132,36 @@ class Linear_Operator(Operator):
 
         k = self.n
         dt = 0.1        # Time step
-        T = 2           # whole elapsed time of system
+        T = 1           # whole elapsed time of system
         viscosity = 1e13   # viscosity parameter
-        dispalcement_history = []
-        stress_history = []
-        start = time.time()
-
+        kappa = np.ones(k)   # internal variable
         sigma = np.zeros(3*k)   # stress
         u_0 = np.zeros(2*k)     # displacement
 
-        for i in range(int(T/dt)):
-            dispalcement_history.append(u_0)
-            stress_history.append(tensor_norm(sigma))
+        dispalcement_history = []
+        stress_history = []
+        kappa_history = []
+        start = time.time()
 
-            u = np.linalg.solve(self.M, self.F + self.M @ u_0 - dt * (1/(2*viscosity)) * (2 * self.a * self.plasticity_A + self.b * self.plasticity_B) @ (sigma - cast_to_set(sigma, 430)) - self.plasticity_A @ sigma )
+
+
+        for i in range(int(T/dt)):
+            dispalcement_history.append(np.array(u_0))
+            stress_history.append(tensor_norm(sigma))
+            kappa_history.append(np.array(kappa))
+
+            u = np.linalg.solve(self.M, self.F + self.M @ u_0 - dt * (1/(2*viscosity)) * (2 * self.a * self.plasticity_A + self.b * self.plasticity_B) @ (sigma - cast_to_set(sigma, 430 * kappa)) - self.plasticity_A @ sigma )
             
-            sigma_diference = sigma - cast_to_set(sigma, 430)
+            sigma_diference = sigma - cast_to_set(sigma, 430 * kappa)
             # kolejnosc pochodnych dy, dx jest podejrzana
-            grad_ux_dx , grad_ux_dy     = np.gradient(u[:k].reshape(self.shape),self.dx, self.dy)
-            grad_ux_dx , grad_ux_dy     = grad_ux_dx.reshape((k)), grad_ux_dy.reshape((k))
-            grad_uy_dx , grad_uy_dy     = np.gradient(u[k:].reshape(self.shape), self.dx, self.dy)
-            grad_uy_dx , grad_uy_dy     = grad_uy_dx.reshape((k)), grad_uy_dy.reshape((k))           
-            grad_u0x_dx, grad_u0x_dy    = np.gradient(u_0[:k].reshape(self.shape),self.dx, self.dy)
-            grad_u0x_dx, grad_u0x_dy    = grad_u0x_dx.reshape((k)), grad_u0x_dy.reshape((k))
-            grad_u0y_dx, grad_u0y_dy    = np.gradient(u_0[k:].reshape(self.shape), self.dx, self.dy)
-            grad_u0y_dx, grad_u0y_dy    = grad_u0y_dx.reshape((k)), grad_u0y_dy.reshape((k))
+            grad_ux_dy , grad_ux_dx     = np.gradient(u[:k].reshape(self.shape),self.dx, self.dy)
+            grad_ux_dy , grad_ux_dx     = grad_ux_dx.reshape((k)), grad_ux_dy.reshape((k))
+            grad_uy_dy , grad_uy_dx     = np.gradient(u[k:].reshape(self.shape), self.dx, self.dy)
+            grad_uy_dy , grad_uy_dx     = grad_uy_dx.reshape((k)), grad_uy_dy.reshape((k))           
+            grad_u0x_dy, grad_u0x_dx    = np.gradient(u_0[:k].reshape(self.shape),self.dx, self.dy)
+            grad_u0x_dy, grad_u0x_dx    = grad_u0x_dx.reshape((k)), grad_u0x_dy.reshape((k))
+            grad_u0y_dy, grad_u0y_dx    = np.gradient(u_0[k:].reshape(self.shape), self.dx, self.dy)
+            grad_u0y_dy, grad_u0y_dx    = grad_u0y_dx.reshape((k)), grad_u0y_dy.reshape((k))
 
 
 
@@ -173,11 +177,13 @@ class Linear_Operator(Operator):
             sigma[k:2*k] -= self.b * (grad_u0x_dx + grad_u0y_dy) + 2 * self.a * grad_u0y_dy
             sigma[2*k:] -= self.a * (grad_u0y_dx + grad_u0x_dy)
             # sigma = Ce(u) + dt*G(sigma) - Ce(u_0) + sigma
+            kappa += dt * (1/(2*viscosity)) * stress_offset(sigma, kappa)
+            # kappa = 1/2*lambda * ||sigma - P(sigma)||
             u_0 = u
 
         end = time.time()
         print("Elapsed time", end - start)
-        return dispalcement_history, stress_history
+        return dispalcement_history, stress_history, kappa_history
 
 n = 36
 p1=0; k = 0.8; b = 0; e = 1/4
@@ -216,34 +222,39 @@ i = 0
 j = 0
 opearator = Linear_Operator(tri.simplices, points, enum, r, 80769, 121153, dx, dy, shape)
 opearator.construct()
-dispacement, stress = opearator.solve()
+dispacement, stress, internal_var = opearator.solve()
 
-fig, [ax1, ax2] = plt.subplots(1,2)
+fig, [ax1, ax2, ax3] = plt.subplots(1,3)
 def animate(i):
     global points
     sig = stress[i % len(stress)]
-    plt.suptitle("T = " + str(i*0.1))
+    plt.suptitle("T = " + str( '%.1f'%(i*0.2) ))
     ax1.clear()
     ax1.set_title("Stress")
-    ax1.imshow(sig.reshape(shape), origin='lower',interpolation='bilinear')
+    c = ax1.imshow(sig.reshape(shape), origin='lower',interpolation='bilinear')
+    kapp = internal_var[i]
     ax2.clear()
-    ax2.set_title("Displacement")
+    ax2.set_title("Internal Variable")
+    ax2.imshow(kapp.reshape(shape), origin='lower',interpolation='bilinear')
+
     u_t = dispacement[i % len(dispacement)]
+    ax3.clear()
+    ax3.set_title("Displacement")
     l=0
     pointsz = np.array(points)
     res = np.reshape(u_t, (2,r))
     res = np.transpose(res)
-    for i in range(np.shape(pointsz)[0]):
-        if pointsz[i][0] == p1:
+    for iter in range(np.shape(pointsz)[0]):
+        if pointsz[iter][0] == p1:
             pass
         else:
-            pointsz[i]+=res[l]
+            pointsz[iter]+=res[l]
             l+=1
     points = np.transpose(points)
     pointsz = np.transpose(pointsz)
-    ax2.triplot(pointsz[0],pointsz[1], tri.simplices, color='blue')
+    ax3.triplot(pointsz[0],pointsz[1], tri.simplices, color='blue')
     points = np.transpose(points)
 
 ani = FuncAnimation(
-    fig, animate, 20, interval=100)
-plt.show()
+    fig, animate, 10, interval=500)
+ani.save("movie.gif")
