@@ -1,7 +1,8 @@
 import numpy as np
+from defs.Primitives import Group
 def tensor_norm(tensor : np.array) -> np.array:
     norm = np.zeros((int(tensor.shape[0]/3)))
-    stress_tensor = np.reshape(np.array(tensor), (3, int(tensor.shape[0]/3))).T
+    stress_tensor = np.reshape(np.array(tensor.copy()), (3, int(tensor.shape[0]/3))).T
     for i,el in enumerate(stress_tensor):
         norm[i] = von_misses_norm(el)
     return norm
@@ -24,3 +25,10 @@ def cast_to_set(tensor : np.array, kappa : np.array) -> np.array:
 
 def von_misses_norm(vector : np.array) -> np.array:
     return np.sqrt(vector[0]**2 - vector[0]*vector[1] + vector[1]**2 + 3*vector[2]**2)
+
+def truncate_shape(tensor, enum):
+    out_tensor = []
+    for (i, el) in enumerate(tensor):
+        if enum[i % len(enum)].group_id != Group.Dirichlet:
+            out_tensor.append(el)
+    return np.array(out_tensor)
