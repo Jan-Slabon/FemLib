@@ -60,8 +60,10 @@ class Operator():
         self.grid = grid
         self.allocate()
     def construct(self) -> None:
+        self.id_elem = 0
         for element in self.grid:
             self.fill(element)
+            self.id_elem += 1
     def fill(self, element) -> None:
         raise NotImplementedError()
     def allocate(self) -> None:

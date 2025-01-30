@@ -122,13 +122,13 @@ class Linear_Operator(Operator):
 
         u_extended = np.zeros(self.shape)
         u_extended[:,1:] = u[:k].reshape(self.truncated_shape)
-        grad_ux_dy, grad_ux_dx     = np.gradient(u_extended, self.dy, self.dx)
-        grad_ux_dy, grad_ux_dx     = grad_ux_dx.reshape((k_extended)), grad_ux_dy.reshape((k_extended))
+        grad_ux_dx, grad_ux_dy     = np.gradient(u_extended, self.dx, self.dy)
+        grad_ux_dx, grad_ux_dy     = grad_ux_dx.reshape((k_extended)), grad_ux_dy.reshape((k_extended))
 
         u_extended = np.zeros(self.shape)
         u_extended[:,1:] = u[k:].reshape(self.truncated_shape)
-        grad_uy_dy, grad_uy_dx     = np.gradient(u_extended, self.dy, self.dx)
-        grad_uy_dy, grad_uy_dx     = grad_uy_dx.reshape((k_extended)), grad_uy_dy.reshape((k_extended))
+        grad_uy_dx, grad_uy_dy     = np.gradient(u_extended, self.dx, self.dy)
+        grad_uy_dx, grad_uy_dy     = grad_uy_dx.reshape((k_extended)), grad_uy_dy.reshape((k_extended))
 
         sigma[:k_extended] += (self.lamb * (grad_ux_dx + grad_uy_dy) + 2 * self.mu * grad_ux_dx)
         sigma[k_extended:2*k_extended] += (self.lamb* (grad_ux_dx + grad_uy_dy) + 2 * self.mu * grad_uy_dy)

@@ -41,5 +41,22 @@ class LinearObstacleSolver():
                 x1[i] = self.max((self.b[i] - np.dot(self.A[i], x1) + self.A[i][i]*x1[i])/self.A[i][i], self.obstacle[i])
             Logging.Log(Log_Level.Debug, "Error value after" + str(k) + "iteration: " + str(np.linalg.norm(x1-x0)))
         return x1
+    
+class IntervalObstacleSolver():
+    def __init__(self, A, b, interval):
+        self.A = A
+        self.b = b
+        self.iterval = interval
+    def solve(self, start, epsilon):
+        x1 = start
+        x0 = np.array(100*x1 + 1) # just to be sure that condition in a while loop is fulfilled
+        k = 0
+        while(np.linalg.norm(x1-x0)>= epsilon):
+            k+=1
+            x0 = np.array(x1)
+            for i in range(len(self.b)):
+                x1[i] = np.clip((self.b[i] - np.dot(self.A[i], x1) + self.A[i][i]*x1[i])/self.A[i][i], 0,1)
+            Logging.Log(Log_Level.Debug, "Error value after " + str(k) + " iteration: " + str(np.linalg.norm(x1-x0)))
+        return x1
 
         

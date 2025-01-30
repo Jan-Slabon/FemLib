@@ -12,9 +12,11 @@ class Const_Map(Map):
     def gradient_function(self, x, y):
         return np.array([0,0])
     def area(self):
-        return np.array( [[self.a[0], self.a[1],1],
+        return np.linalg.det( np.array( [[self.a[0], self.a[1],1],
                 [self.b[0], self.b[1], 1],
-                [self.c[0], self.c[1], 1]] )
+                [self.c[0], self.c[1], 1]] ) )
+    def integral(self):
+        return self.area()
 
 class Linear_Map(Map):
     def __init__(self, a, b, c):
@@ -61,9 +63,12 @@ class Linear_Map(Map):
 
 
 class Linear_Integrator(Integrator):
-    def __init__(self, lin_map : Linear_Map, lin_map2) -> None:
+    def __init__(self, lin_map : Linear_Map, lin_map2 : Linear_Map) -> None:
         super().__init__(lin_map, lin_map2)
     def value_integral(self):
+        if (self.map1.a == self.map2.a).all():
+            return 1/12 * self.map1.jacobian(0,0)
+        return 1/24 * self.map1.jacobian(0,0)
         integral1, err1 = integrate.dblquad(lambda x,y : self.map1.shape_function(x,y) * self.map2.shape_function(x,y) *
         self.map1.jacobian(x,y), 0, 1, lambda x : 0, lambda x : 1 - x, epsabs=1.5e-4, epsrel=1.5e-4)
         return integral1
@@ -76,13 +81,16 @@ class Linear_Integrator(Integrator):
         return np.array([self.map1.integral() * self.map2.gradient_function(1,1)[0], self.map2.integral() * self.map1.gradient_function(1,1)[0],
                          self.map1.integral() * self.map2.gradient_function(1,1)[1], self.map2.integral() * self.map1.gradient_function(1,1)[1]])
 
-class Const_Integrator(Integrator):
-    def __init__(self, map : Const_Map) -> None:
-        super().__init__()
-        self.map = map
+class Const_Linear_Integrator(Integrator):
+    def __init__(self, const_map : Const_Map, lin_map : Linear_Map) -> None:
+        super().__init__(const_map, lin_map)
+        self.const_map = const_map
+        self.lin_map = lin_map
     def value_integral(self):
         integral = self.map.area()
         return integral, integral, integral
+    def value_grad_integral(self):
+        return self.const_map.integral() * self.lin_map.gradient_function(1,1)
     def gradient_integral(self):
         raise RuntimeError("Zero order elements are not suited for usage in gradient dependent cases!")
 
@@ -103,6 +111,13 @@ class Linear_Element(Element):
                 break
         return Linear_Integrator(map1, map2)
 
-class Const_Element(Element):
-    def __init__(self, integrator: Const_Integrator) -> None:
-        super().__init__(integrator)
+class Const_Linear_Element(Element):
+    def __init__(self, triangle: list) -> None:
+        super().__init__(triangle)
+    def build(self, node1):
+        for (i,el) in enumerate(self.shape):
+            if np.array_equal(el, node1):
+                lin_map = Linear_Map(self.shape[i], self.shape[(i+1)%3], self.shape[(i+2)%3])
+                break
+        const_map = Const_Map(self.shape[0], self.shape[1], self.shape[2])
+        return Const_Linear_Integrator(const_map, lin_map)
