@@ -7,31 +7,22 @@ import numpy as np
 import matplotlib.pyplot as plt
 from defs.Impl import Linear_Element, Linear_Map, Const_Linear_Element
 from defs.Primitives import Point, Group, Operator, Function
-from defs.Solvers import LinearObstacleSolver, IntervalObstacleSolver
+from defs.Solvers import LinearObstacleSolver, IntervalObstacleSolver, Discriminator, TNNMG
 from defs.utils.Plasticity import cast_to_set, tensor_norm, stress_offset, element_derivatives, pointvise_stress_norm
 from matplotlib.animation import FuncAnimation
+from defs.logging.Log import Logging, Log_Level
 import time
 def right_corner(x):
     if x[1] == e and x[0] >= 0.5 and x[0] <= 0.7:
-        return -6
+        return -2
     elif x[1] == b and x[0] >= 0.5 and x[0] <= 0.7:
         return 0
     else:
         return 0
-def right_size(x):
-    if x[0] == 0.8 and x[1] >= 0.05 and x[1] <= 0.15:
-        return 0
-    else: return 0
-def is_zero(arr):
-    flag = True
-    for array_el in arr:
-        if array_el > 0:
-            print("something")
-        if array_el != 0.0:
-            print("nie jest rowne!")
-            flag = False
-            break
-    return flag
+def right_side(x):
+    if(x[0] == 0.8):
+        return -10
+    else : return 0
 class Linear_Operator(Operator):
     def __init__(self, grid, points, enum, n, a, b, dx, dy, truncated_grid_shape, grid_shape) -> None:
         self.points = points
@@ -109,7 +100,7 @@ class Linear_Operator(Operator):
                     # self.f2[p.rid] += area2
                 elif p.group_id == Group.Neuman:
                     neuman.append([trian,p])
-            h = lambda x : right_size(x)
+            h = lambda x : right_side(x)
             h2 = lambda x : right_corner(x)
             if len(neuman) > 1: # NonHomogenus Neuman
                 for t, p in neuman:
@@ -171,8 +162,61 @@ class Linear_Operator(Operator):
                 jacobian = Linear_Map(a,b,c).jacobian(0,0)
                 const_projection[index] = base_triangle_avg_value * jacobian
             return const_projection
-        
 
+    def coulomb_friction_law(self, values):
+        result = 0
+        for triangle in self.grid:
+            contact_points = [ (self.points[idx], idx) for idx in triangle if self.enum[idx].group_id == Group.Contact]
+            edges = []
+            if len(contact_points) <= 1:
+                continue
+            elif len(contact_points) == 2:
+                edges.append((contact_points[0], contact_points[1]))
+            elif len(contact_points) == 3:
+                # TODO
+                raise NotImplementedError()
+            else:
+                Logging.Log(Log_Level.Error, "Unsupported amount of vertex")
+                raise NotImplementedError()
+            for edge in edges:
+                vert_l, id_l = edge[0]
+                vert_r, id_r = edge[1]
+
+                value_l_x = values[id_l]
+                value_r_x = values[id_r]
+                value_l_y = values[id_l + self.n]
+                value_r_y = values[id_r + self.n]
+
+
+                #tangential vector should be updated with regards to changed coordinates of vertices
+                tangential_vector = (vert_r - vert_l) / np.linalg.norm(vert_r - vert_l)
+
+                value_l = np.array([value_l_x, value_l_y]) @ tangential_vector
+                value_r = np.array([value_r_x, value_r_y]) @ tangential_vector
+
+                if value_l*value_r >= 0:
+                    result += (abs(value_l) + abs(value_r)) * np.linalg.norm(vert_r - vert_l) / 2
+                else:
+                    f0 = abs(value_r) * np.linalg.norm(vert_r - vert_l) / (abs(value_l) + abs(value_r))
+                    result += f0 * abs(value_l) / 2
+                    result += (np.linalg.norm(vert_r - vert_l) - f0) * abs(value_r)
+        return result
+                    
+    def prepare_tangential_and_size_of_boundary(self):
+        tangential_vector = np.zeros((self.n,2))
+        for triangle in self.grid:
+            contact_points = [ (self.points[idx], idx) for idx in triangle if self.enum[idx].group_id == Group.Contact]
+            edges = []
+            if len(contact_points) <= 1:
+                continue
+            edges.append((contact_points[0], contact_points[1]))
+            for edge in edges:
+                vert_l, id_l = edge[0]
+                vert_r, id_r = edge[1]
+
+                non_normalize_tangential_vector = (vert_r - vert_l)
+                tangential_vector[id_l] = non_normalize_tangential_vector
+        return tangential_vector
 
     def solve(self): #-> List[Function]:
         self.asemble_matrices()
@@ -180,8 +224,10 @@ class Linear_Operator(Operator):
         k = self.n
         k_extended = self.sigma_size
         dt = 0.05        # Time step
-        T = 2           # whole elapsed time of system
+        T = 1           # whole elapsed time of system
+        friction_coef = 10 # friction coeficient
         viscosity = 1e3 #1e10   # viscosity parameter
+        discriminator = Discriminator(self.enum, self.n)
         kappa = np.ones(k_extended)   # internal variable
         sigma = np.zeros(3*k_extended)   # stress
         sum_of_G = np.zeros(3*k_extended)
@@ -192,25 +238,28 @@ class Linear_Operator(Operator):
         kappa_history = []
         damage_history = []
         start = time.time()
-
+        tangential_vector = self.prepare_tangential_and_size_of_boundary()
+        tnnmg_solver : TNNMG = TNNMG(self.M, self.F -  dt * self.plasticity_A @ sum_of_G, friction_coef * np.reshape(tangential_vector, self.n * 2), self.Contact_Limits, discriminator)
 
         for i in range(int(T/dt)):
-
+            print("Iteration", str(i), "out of ", str(int(T/dt - 1)))
             dispalcement_history.append(np.array(u_0))
             damage_history.append(np.array(damage))
-            kappa_history.append(tensor_norm(dt * sum_of_G))
+            kappa_history.append(kappa)
             stress_history.append(tensor_norm(sigma))
 
-            if i <= int( int(T/dt) / 2):
-                pass
-            else:
-                self.F  = np.zeros(self.F.shape)
+            # if i <= int( int(T/dt) / 2):
+            #     self.F += self.F * 0.1
+            # else:
+            #     self.F = np.zeros(self.F.shape)
 
             # Div(sigma) = f
-            u = np.linalg.solve(self.M, self.F -  dt * self.plasticity_A @ sum_of_G)
-
+            #res = minimize(fun = lambda x: 0.5 * x @ self.M @ x - x @ self.F + dt * x @ self.plasticity_A @ sum_of_G + friction_coef * np.sum(tangential_vector * np.reshape(x, (self.n,2))), x0 = u_0, method="Powell")
+            #u = np.linalg.solve(self.M, self.F -  dt * self.plasticity_A @ sum_of_G) # + friction_coef * np.reshape(tangential_vector, (2 * self.n)))
+            tnnmg_solver.update_rhs(self.F -  dt * self.plasticity_A @ sum_of_G)
+            u = tnnmg_solver.solve()
             # sigma = Ce(u) + dt*G(sigma) - Ce(u_0) + sigma
-            sigma_diference = sigma - cast_to_set(sigma, 10 * kappa * self.linear_to_constant_elements(damage)) # 430
+            sigma_diference = sigma - cast_to_set(sigma, 430 * kappa* self.linear_to_constant_elements(damage)) # 430
 
             u1_dx_dy = element_derivatives(self.grid, self.enum, u[:k])
             u2_dx_dy = element_derivatives(self.grid, self.enum, u[k:])
@@ -228,8 +277,8 @@ class Linear_Operator(Operator):
             # kappa = 1/2*lambda * ||sigma - P(sigma)||
             kappa += dt * (1/(2*viscosity)) * stress_offset(sigma, kappa)
             # damage' = div(grad(damage)) + f
-            solver = IntervalObstacleSolver(self.value_product + 0.01 * dt * self.damage_field, self.value_product @ damage  - dt * self.assemble_damage_right_hside(  1/100 *  pointvise_stress_norm(sigma)), (0,1))
-            damage = solver.solve(np.ones(damage.shape), 1e-3)
+            linear_obstacle_solver = IntervalObstacleSolver(self.value_product + 0.0001 * dt * self.damage_field, self.value_product @ damage  - dt * self.assemble_damage_right_hside(  1/100 *  pointvise_stress_norm(sigma)))
+            damage = linear_obstacle_solver.solve(np.ones(damage.shape), 1e-3)
 
             u_0 = u
 
@@ -238,12 +287,13 @@ class Linear_Operator(Operator):
         return dispalcement_history, stress_history, kappa_history, damage_history
 
 
-n = 36
+n = 24
 p1=0; k = 0.8; b = 0; e = 1/4
 dx = (k - p1) / n
 dy = (b - e) / int(n/3)
 truncated_shape = (int(n/3), n-1)
 shape = (int(n/3), n)
+time_steps = 20
 x = np.linspace(p1,k,n)
 y = np.linspace(b,e,int(n/3))
 pointsx, pointsy = np.meshgrid(x,y)
@@ -259,11 +309,11 @@ r=0
 for p in points:
     if p[0] == p1:
         enum.append(Point(p, i, -1, Group.Dirichlet))
-    elif p[1] == e or p[0] == k or p[1] == b:
-        enum.append(Point(p, i, r, Group.Neuman))
-        r+=1
-    elif p[1] == b and p[0]>=0.3 and p[0]<=0.5:
+    elif p[1] == b:
         enum.append(Point(p, i, r, Group.Contact))
+        r+=1
+    elif p[1] == e or p[0] == k:
+        enum.append(Point(p, i, r, Group.Neuman))
         r+=1
     else:
         enum.append(Point(p, i, r, Group.Interior))
@@ -276,8 +326,6 @@ j = 0
 opearator = Linear_Operator(tri.simplices, points, enum, r, 1098, 769, dx, dy, truncated_shape, shape) # 80769, 121153 / 1098, 769
 opearator.construct()
 dispacement, stress, internal_var, damage = opearator.solve()
-
-import matplotlib.tri as triangulation
 
 fig, [ax1, ax2] = plt.subplots(1,2)
 def animate(i):
@@ -302,12 +350,12 @@ def animate_damage(i):
     #ax3.imshow(dam.reshape(truncated_shape))
 
 ani = FuncAnimation(
-    fig, animate, 40, interval=100)
-ani.save("stress.gif")
+    fig, animate, time_steps, interval=100)
+ani.save("stress_2.gif")
 
 ani3 = FuncAnimation(
-    fig3, animate_damage, 40, interval=100)
-ani3.save("damage.gif")
+    fig3, animate_damage, time_steps, interval=100)
+ani3.save("damage_2.gif")
 fig2, ax = plt.subplots(1,1)
 def animate_dispacement(i):
     global points
@@ -333,5 +381,5 @@ def animate_dispacement(i):
     points = np.transpose(points)
 
 ani2 = FuncAnimation(
-    fig2, animate_dispacement, 40, interval=100)
-ani2.save("displacement.gif")
+    fig2, animate_dispacement, time_steps, interval=100)
+ani2.save("displacement_3.gif")
