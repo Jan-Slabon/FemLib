@@ -13,16 +13,18 @@ from matplotlib.animation import FuncAnimation
 from defs.logging.Log import Logging, Log_Level
 import time
 def right_corner(x):
-    if x[1] == e and x[0] >= 1.5 and x[0] <= 2:
-        return 0 #-2
-    elif x[1] == b and x[0] >= 0.5 and x[0] <= 0.7:
+    if x[1] == top and x[0] >= 1.5 and x[0] <= 2:
+        return -2
+    elif x[1] == bottom and x[0] >= 0.5 and x[0] <= 0.7:
         return 0
     else:
         return 0
 def right_side(x):
     if(x[0] == 2):
-        return 0 #-10
+        return -10
     else : return 0
+def gravity(x):
+    return np.array([0, -5])
 class Linear_Operator(Operator):
     def __init__(self, grid, points, enum, n, a, b, dx, dy, truncated_grid_shape, grid_shape) -> None:
         self.points = points
@@ -43,12 +45,17 @@ class Linear_Operator(Operator):
         self.A2 = np.zeros((self.n, self.n))
         self.B = np.zeros((self.n*2, self.n*2))
         self.D = np.zeros((self.n*2))
+        # Neuman boundary condition vectors
+        self.fN1 = np.zeros(self.n)
+        self.fN2 = np.zeros(self.n)
+        # Body force vectors
         self.f1 = np.zeros(self.n)
         self.f2 = np.zeros(self.n)
         self.plasticity_first_part = np.zeros((self.n, self.sigma_size))
         self.plasticity_second_part = np.zeros((self.n, self.sigma_size))
         self.damage_field = np.zeros((self.extanded_boundary_size, self.extanded_boundary_size))
         self.value_product = np.zeros((self.extanded_boundary_size, self.extanded_boundary_size))
+        self.internal_value_product = np.zeros((self.n, self.n))
 
     def fill(self, triangle) -> None:
         element = Linear_Element([self.points[triangle[0]], self.points[triangle[1]], self.points[triangle[2]]])
@@ -78,6 +85,7 @@ class Linear_Operator(Operator):
                     self.C[enum2.rid][enum.rid] += self.lamb * mix_grad[1][0] + 0.5 * self.mu * mix_grad[0][1]
                     self.A2[enum2.rid][enum.rid] += self. lamb * mix_grad[1][1] + self.mu * mix_grad[1][1] + 0.5 * self.mu * mix_grad[0][0]
 
+                    self.internal_value_product[enum2.rid][enum.rid] += val_integral
 
                 if enum.group_id == Group.Contact:
                     self.B[enum.rid+self.n][enum.rid+self.n] = -1
@@ -91,13 +99,9 @@ class Linear_Operator(Operator):
             neuman = []
             for trian, p in zip(tr,tr2):
                 if p.group_id == Group.Interior:
-                    pass
-                    # area, err = integrate.dblquad(lambda x,y : trian.shape_function(x,y) * function(trian.map_triangle([x,y]))[0] *
-                    # trian.jacobian(x,y), 0, 1, lambda x : 0, lambda x : 1 - x, epsabs=1.5e-4, epsrel=1.5e-4)
-                    # area2, err2 = integrate.dblquad(lambda x,y : trian.shape_function(x,y) * function(trian.map_triangle([x,y]))[1] *
-                    # trian.jacobian(x,y), 0, 1, lambda x : 0, lambda x : 1 - x, epsabs=1.5e-4, epsrel=1.5e-4)
-                    # self.f1[p.rid] += area
-                    # self.f2[p.rid] += area2
+                    force = gravity(p.x)
+                    self.f1[p.rid] += force[0]
+                    self.f2[p.rid] += force[1]
                 elif p.group_id == Group.Neuman:
                     neuman.append([trian,p])
             h = lambda x : right_side(x)
@@ -106,8 +110,8 @@ class Linear_Operator(Operator):
                 for t, p in neuman:
                     for t2, p2 in neuman:
                         if p.id != p2.id:
-                            self.f1[p.rid] += h(p.x)*0.5*np.linalg.norm(np.array(p.x) - np.array(p2.x))
-                            self.f2[p.rid] += h2(p.x)*0.5*np.linalg.norm(np.array(p.x) - np.array(p2.x))
+                            self.fN1[p.rid] += h(p.x)*0.5*np.linalg.norm(np.array(p.x) - np.array(p2.x))
+                            self.fN2[p.rid] += h2(p.x)*0.5*np.linalg.norm(np.array(p.x) - np.array(p2.x))
     def asemble_matrices(self) -> None:         # Fills large matrices with values of matrices calculated in fill()
         k = self.n
         k_extended = self.sigma_size
@@ -115,14 +119,21 @@ class Linear_Operator(Operator):
         self.F = np.zeros(2*k)
         self.plasticity_A = np.zeros((k*2, k_extended*3))
         self.plasticity_B = np.zeros((k*2, k_extended*3))
+        self.value_product_extended = np.zeros((2*k, 2*k))
 
         self.M[:k,:k] = self.A
         self.M[:k,k:] = self.C
         self.M[k:,:k] = self.C.T
         self.M[k:,k:] = self.A2
 
+        self.value_product_extended[:k,:k] = self.internal_value_product
+        self.value_product_extended[k:,k:] = self.internal_value_product
+
         self.F[:k] = self.f1
         self.F[k:] = self.f2
+        self.F = self.value_product_extended @ self.F
+        self.F[:k] += self.fN1
+        self.F[k:] += self.fN2
 
         self.plasticity_A[:k,:k_extended] = self.plasticity_first_part
         self.plasticity_A[k:,2*k_extended:] = self.plasticity_first_part
@@ -138,7 +149,7 @@ class Linear_Operator(Operator):
         
         self.Contact_Points = np.diag(self.B)
         self.Contact_Interval_Length = self.Contact_Points * 0.03
-        self.Contact_Limits = np.array([ -1000 if x == 0 else -1000 for x in self.Contact_Points * 0.05])
+        self.Contact_Limits = np.array([ -1000 if x == 0 else 0 for x in self.Contact_Points * 0.05])
 
     def assemble_damage_right_hside(self, stress_norm):
         multiplication_result = np.zeros(self.extanded_boundary_size)
@@ -220,7 +231,7 @@ class Linear_Operator(Operator):
 
     def solve(self): #-> List[Function]:
         self.asemble_matrices()
-        innitial_F = np.array(self.F)
+
         k = self.n
         k_extended = self.sigma_size
         dt = 0.05        # Time step
@@ -245,15 +256,8 @@ class Linear_Operator(Operator):
             print("Iteration", str(i), "out of ", str(int(T/dt - 1)))
             dispalcement_history.append(np.array(u_0))
             damage_history.append(np.array(damage))
-            kappa_history.append(kappa)
+            kappa_history.append(np.array(kappa))
             stress_history.append(tensor_norm(sigma))
-
-            if i <= int( int(T/dt) / 2):
-                self.F = 2* innitial_F * i* dt
-            elif i <= int(T/dt):
-                self.F = 2* innitial_F * int( int(T/dt) / 2) * dt - 2* innitial_F * (i - int( int(T/dt) / 2))* dt
-            else:
-                self.F = np.zeros(innitial_F.shape)
 
             # Div(sigma) = f
             #res = minimize(fun = lambda x: 0.5 * x @ self.M @ x - x @ self.F + dt * x @ self.plasticity_A @ sum_of_G + friction_coef * np.sum(tangential_vector * np.reshape(x, (self.n,2))), x0 = u_0, method="Powell")
@@ -276,7 +280,7 @@ class Linear_Operator(Operator):
             sigma[2*k_extended:] = (self.lamb* 0.5 * (u2_dx_dy[:, 0] + u1_dx_dy[:,1]))
             
             sigma += dt * sum_of_G
-            # kappa = 1/2*lambda * ||sigma - P(sigma)||
+            # kappa' = 1/2*lambda * ||sigma - P(sigma)||
             kappa += dt * (1/(2*viscosity)) * stress_offset(sigma, kappa)
             # damage' = div(grad(damage)) + f
             linear_obstacle_solver = IntervalObstacleSolver(self.value_product + 0.0001 * dt * self.damage_field, self.value_product @ damage  - dt * self.assemble_damage_right_hside(  1/100 *  pointvise_stress_norm(sigma)))
@@ -289,15 +293,15 @@ class Linear_Operator(Operator):
         return dispalcement_history, stress_history, kappa_history, damage_history
 
 
-n = 30
-p1=0; k = 2; b = 0; e = 1
-dx = (k - p1) / n
-dy = (b - e) / int(n/3)
+n = 24
+left=0; right = 2; bottom = 0; top = 1
+dx = (right - left) / n
+dy = (bottom - top) / int(n/3)
 truncated_shape = (int(n/3), n-1)
 shape = (int(n/3), n)
 time_steps = 20
-x = np.linspace(p1,k,n)
-y = np.linspace(b,e,int(n/3))
+x = np.linspace(left,right,n)
+y = np.linspace(bottom,top,int(n/3))
 pointsx, pointsy = np.meshgrid(x,y)
 vert = []
 for i, j in zip(pointsx, pointsy):
@@ -309,12 +313,12 @@ enum = []
 i=0
 r=0
 for p in points:
-    if p[0] == p1:
+    if p[0] == left:
         enum.append(Point(p, i, -1, Group.Dirichlet))
-    elif p[1] == b:
+    elif p[1] == bottom:
         enum.append(Point(p, i, r, Group.Contact))
         r+=1
-    elif p[1] == e or p[0] == k:
+    elif p[1] == top or p[0] == right:
         enum.append(Point(p, i, r, Group.Neuman))
         r+=1
     else:
@@ -323,6 +327,13 @@ for p in points:
     i+=1
     
 tri = Delaunay(points)
+edges = [ (tri.simplices[i][j], tri.simplices[i][(j+1)%3]) for i in range(tri.simplices.shape[0]) for j in range(3)]
+for edge in edges:
+    p1_edge = points[edge[0]]
+    p2_edge = points[edge[1]]
+    if (p1_edge[1] == bottom and p2_edge[1] == bottom)
+    or (p1_edge[0] == right and p2_edge[0] == right) or (p1_edge[1] == top and p2_edge[1] == top):
+        continue
 i = 0
 j = 0
 opearator = Linear_Operator(tri.simplices, points, enum, r, 1098, 769, dx, dy, truncated_shape, shape) # 80769, 121153 / 1098, 769
@@ -364,15 +375,15 @@ def animate_dispacement(i):
     u_t = dispacement[i % len(dispacement)]
     plt.suptitle("T = " + str( '%.1f'%(i*0.05) ))
     ax.clear()
-    plt.ylim(b - 0.1*(e - b), e + 0.1*(e - b))
-    plt.xlim(p1 - 0.1*(k - p1), k + 0.1*(k - p1))
+    plt.ylim(bottom - 0.1*(top - bottom), top + 0.1*(top - bottom))
+    plt.xlim(left - 0.1*(right - left), right + 0.1*(right - left))
     ax.set_title("Displacement")
     l=0
     pointsz = np.array(points)
     res = np.reshape(u_t, (2,r))
     res = np.transpose(res)
     for iter in range(np.shape(pointsz)[0]):
-        if pointsz[iter][0] == p1:
+        if pointsz[iter][0] == left:
             pass
         else:
             pointsz[iter]+=res[l]
@@ -386,17 +397,17 @@ ani2 = FuncAnimation(
     fig2, animate_dispacement, time_steps, interval=100)
 ani2.save("displacement_3.gif")
 
-u_t = 3* dispacement[-1]
+u_t = dispacement[-1]
 ax.clear()
-plt.ylim(-0.3, e + 0.1*(e - b))
-plt.xlim(0, k + 0.1*(k - p1))
+plt.ylim(-0.3, top + 0.1*(top - bottom))
+plt.xlim(0, right + 0.1*(right - left))
 ax.set_title("Displacement")
 l=0
 pointsz = np.array(points)
 res = np.reshape(u_t, (2,r))
 res = np.transpose(res)
 for iter in range(np.shape(pointsz)[0]):
-    if pointsz[iter][0] == p1:
+    if pointsz[iter][0] == left:
         pass
     else:
         pointsz[iter]+=res[l]
@@ -405,7 +416,7 @@ points = np.transpose(points)
 pointsz = np.transpose(pointsz)
 ax.triplot(pointsz[0],pointsz[1], tri.simplices, color='blue')
 points = np.transpose(points)
-plt.savefig("final_displacement_3.png")
+plt.savefig("final_displacement_contact.png")
 
 
 fig, [ax1, ax2] = plt.subplots(1,2)
@@ -413,9 +424,9 @@ sig = stress[-1]
 plt.suptitle("T = " + str( 1 ))
 ax1.clear()
 ax1.set_title("Stress")
-c = ax1.tripcolor(points[:,0], points[:,1], sig, triangles = tri.simplices)
-kapp = internal_var[i % len(internal_var)]
+c = ax1.tripcolor(points[:,0], points[:,1], sig, triangles = tri.simplices, edgecolors='k')
+kapp = internal_var[-1]
 ax2.clear()
 ax2.set_title("Internal Variable")
-ax2.tripcolor(points[:,0], points[:,1], kapp, triangles = tri.simplices)
-fig.savefig("final_stress_internalvar_2.png")
+ax2.tripcolor(points[:,0], points[:,1], kapp, triangles = tri.simplices, edgecolors='k')
+fig.savefig("final_stress_internalvar_contact.png")
