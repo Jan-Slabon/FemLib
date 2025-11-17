@@ -92,7 +92,10 @@ class Discriminator:
             result = np.zeros(len(friction) * 2) # friction here is defined as per node of triangulation and not per subspace
             for i,el in enumerate(friction):
                 if(self.contact_boundary[i] == 1):
-                    if(el[0] + el[1] >= 0):
+                    if(self.close_to(abs(el[0] + el[1]), 0)):
+                        result[i] = 0
+                        result[i + self.n] = 0
+                    elif(el[0] + el[1] > 0):
                         result[i] = 1
                         result[i + self.n] = 1
                     else:

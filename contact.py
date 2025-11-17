@@ -13,15 +13,15 @@ from matplotlib.animation import FuncAnimation
 from defs.logging.Log import Logging, Log_Level
 import time
 def right_corner(x):
-    if x[1] == e and x[0] >= 1.5 and x[0] <= 2:
-        return -8
+    if x[1] == e and x[0] >= 0.5 and x[0] <= 1:
+        return -2
     elif x[1] == b and x[0] >= 0.5 and x[0] <= 0.7:
         return 0
     else:
         return 0
 def right_side(x):
     if(x[0] == 2):
-        return 0 #-10
+        return -10
     else : return 0
 class Linear_Operator(Operator):
     def __init__(self, grid, points, enum, n, a, b, dx, dy, truncated_grid_shape, grid_shape) -> None:
@@ -138,7 +138,7 @@ class Linear_Operator(Operator):
         
         self.Contact_Points = np.diag(self.B)
         self.Contact_Interval_Length = self.Contact_Points * 0.03
-        self.Contact_Limits = np.array([ -1000 if x == 0 else -1000 for x in self.Contact_Points * 0.05])
+        self.Contact_Limits = np.array([ -1000 if x == 0 else 0 for x in self.Contact_Points * 0.05])
 
     def assemble_damage_right_hside(self, stress_norm):
         multiplication_result = np.zeros(self.extanded_boundary_size)
@@ -220,7 +220,7 @@ class Linear_Operator(Operator):
 
     def solve(self): #-> List[Function]:
         self.asemble_matrices()
-        innitial_F = np.array(self.F)
+
         k = self.n
         k_extended = self.sigma_size
         dt = 0.05        # Time step
@@ -248,12 +248,10 @@ class Linear_Operator(Operator):
             kappa_history.append(kappa)
             stress_history.append(tensor_norm(sigma))
 
-            if i <= int( int(T/dt) / 2):
-                self.F = 2* innitial_F * i* dt
-            elif i <= int(T/dt):
-                self.F = 2* innitial_F * int( int(T/dt) / 2) * dt - 2* innitial_F * (i - int( int(T/dt) / 2))* dt
-            else:
-                self.F = np.zeros(innitial_F.shape)
+            # if i <= int( int(T/dt) / 2):
+            #     self.F += self.F * 0.1
+            # else:
+            #     self.F = np.zeros(self.F.shape)
 
             # Div(sigma) = f
             #res = minimize(fun = lambda x: 0.5 * x @ self.M @ x - x @ self.F + dt * x @ self.plasticity_A @ sum_of_G + friction_coef * np.sum(tangential_vector * np.reshape(x, (self.n,2))), x0 = u_0, method="Powell")
@@ -289,7 +287,7 @@ class Linear_Operator(Operator):
         return dispalcement_history, stress_history, kappa_history, damage_history
 
 
-n = 30
+n = 24
 p1=0; k = 2; b = 0; e = 1
 dx = (k - p1) / n
 dy = (b - e) / int(n/3)
@@ -385,37 +383,3 @@ def animate_dispacement(i):
 ani2 = FuncAnimation(
     fig2, animate_dispacement, time_steps, interval=100)
 ani2.save("displacement_3.gif")
-
-u_t = 3* dispacement[-1]
-ax.clear()
-plt.ylim(-0.3, e + 0.1*(e - b))
-plt.xlim(0, k + 0.1*(k - p1))
-ax.set_title("Displacement")
-l=0
-pointsz = np.array(points)
-res = np.reshape(u_t, (2,r))
-res = np.transpose(res)
-for iter in range(np.shape(pointsz)[0]):
-    if pointsz[iter][0] == p1:
-        pass
-    else:
-        pointsz[iter]+=res[l]
-        l+=1
-points = np.transpose(points)
-pointsz = np.transpose(pointsz)
-ax.triplot(pointsz[0],pointsz[1], tri.simplices, color='blue')
-points = np.transpose(points)
-plt.savefig("final_displacement_3.png")
-
-
-fig, [ax1, ax2] = plt.subplots(1,2)
-sig = stress[-1]
-plt.suptitle("T = " + str( '%.1f'%(i*0.05) ))
-ax1.clear()
-ax1.set_title("Stress")
-c = ax1.tripcolor(points[:,0], points[:,1], sig, triangles = tri.simplices)
-kapp = internal_var[i % len(internal_var)]
-ax2.clear()
-ax2.set_title("Internal Variable")
-ax2.tripcolor(points[:,0], points[:,1], kapp, triangles = tri.simplices)
-fig.savefig("final_stress_internalvar_2.png")
