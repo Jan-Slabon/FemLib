@@ -14,7 +14,7 @@ from defs.logging.Log import Logging, Log_Level
 import time
 def right_corner(x):
     if x[1] == e and x[0] >= 1.5 and x[0] <= 2:
-        return 0 #-2
+        return -8
     elif x[1] == b and x[0] >= 0.5 and x[0] <= 0.7:
         return 0
     else:
@@ -254,6 +254,12 @@ class Linear_Operator(Operator):
                 self.F = 2* innitial_F * int( int(T/dt) / 2) * dt - 2* innitial_F * (i - int( int(T/dt) / 2))* dt
             else:
                 self.F = np.zeros(innitial_F.shape)
+            if i <= int( int(T/dt) / 2):
+                self.F = 2* innitial_F * i* dt
+            elif i <= int(T/dt):
+                self.F = 2* innitial_F * int( int(T/dt) / 2) * dt - 2* innitial_F * (i - int( int(T/dt) / 2))* dt
+            else:
+                self.F = np.zeros(innitial_F.shape)
 
             # Div(sigma) = f
             #res = minimize(fun = lambda x: 0.5 * x @ self.M @ x - x @ self.F + dt * x @ self.plasticity_A @ sum_of_G + friction_coef * np.sum(tangential_vector * np.reshape(x, (self.n,2))), x0 = u_0, method="Powell")
@@ -289,6 +295,8 @@ class Linear_Operator(Operator):
         return dispalcement_history, stress_history, kappa_history, damage_history
 
 
+n = 30
+p1=0; k = 2; b = 0; e = 1
 n = 30
 p1=0; k = 2; b = 0; e = 1
 dx = (k - p1) / n
@@ -337,6 +345,7 @@ def animate(i):
     ax1.set_title("Stress")
     c = ax1.tripcolor(points[:,0], points[:,1], sig, triangles = tri.simplices)
     kapp = internal_var[i % len(internal_var)]
+    kapp = internal_var[i % len(internal_var)]
     ax2.clear()
     ax2.set_title("Internal Variable")
     ax2.tripcolor(points[:,0], points[:,1], kapp, triangles = tri.simplices)
@@ -364,6 +373,8 @@ def animate_dispacement(i):
     u_t = dispacement[i % len(dispacement)]
     plt.suptitle("T = " + str( '%.1f'%(i*0.05) ))
     ax.clear()
+    plt.ylim(b - 0.1*(e - b), e + 0.1*(e - b))
+    plt.xlim(p1 - 0.1*(k - p1), k + 0.1*(k - p1))
     plt.ylim(b - 0.1*(e - b), e + 0.1*(e - b))
     plt.xlim(p1 - 0.1*(k - p1), k + 0.1*(k - p1))
     ax.set_title("Displacement")
